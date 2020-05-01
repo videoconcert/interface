@@ -1,5 +1,5 @@
 use yew::worker::*;
-use yew::agent::{Dispatched};
+use yew::agent::{AgentLink};
 use wasm_bindgen::prelude::*;
 use web_sys::{MediaDevices, window, console, MediaStreamConstraints};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
@@ -11,17 +11,20 @@ use serde::{Serialize, Deserialize};
 pub enum Request {
   GetStream,
   GetDevices,
+}
 
-  //SetStream(JsValue),
+#[derive(Debug)]
+pub enum Message {
+  SetStream(JsValue),
   SetDevices(Vec<InputDeviceInfo>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct DeviceId(pub String);
+pub struct DeviceId(pub String);
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-struct InputDeviceInfo {
+pub struct InputDeviceInfo {
   device_id: DeviceId,
   group_id: String,
   kind: String,
@@ -39,7 +42,7 @@ pub struct MediaManager {
 
 impl Agent for MediaManager {
   type Reach = Context;
-  type Message = ();
+  type Message = Message;
   type Input = Request;
   type Output = ();
 
@@ -58,7 +61,18 @@ impl Agent for MediaManager {
     }
   }
 
-  fn update(&mut self, _: Self::Message) {}
+  fn update(&mut self, msg: Self::Message) {
+    match msg {
+      Message::SetStream(stream) => {
+        console::log_2(&"We have stream".into(), &stream);
+        self.media_stream = Some(stream);
+      },
+      Message::SetDevices(devices) => {
+        console::log_2(&"We have devices".into(), &JsValue::from_serde(&devices).unwrap());
+        self.known_devices = devices;
+      }
+    }
+  }
 
   fn handle_input(&mut self, msg: Self::Input, _: HandlerId) {
     match msg {
@@ -71,12 +85,10 @@ impl Agent for MediaManager {
             &self.media_devices,
             &media_constraints).unwrap();
 
-        let mut dispatcher = MediaManager::dispatcher();
+        let link = self.link.clone();
         let handler = async move {
             let media = JsFuture::from(media_promise).await.unwrap();
-            //dispatcher.send(Request::SetStream(media));
-
-            console::log_2(&"We have stream".into(), &media);
+            link.callback(|media| Message::SetStream(media)).emit(media);
         };
 
         spawn_local(handler);
@@ -84,21 +96,18 @@ impl Agent for MediaManager {
       Request::GetDevices => {
         let devices_promise = MediaDevices::enumerate_devices(&self.media_devices).unwrap();
 
+        let link = self.link.clone();
         let handler = async move {
             let devices = JsFuture::from(devices_promise).await
                             .unwrap()
                             .into_serde::<Vec<InputDeviceInfo>>()
                             .unwrap();
 
-            console::log_2(&"We have devices".into(), &JsValue::from_serde(&devices).unwrap());
-            MediaManager::dispatcher().send(Request::SetDevices(devices));
+            link.callback(|devices| Message::SetDevices(devices)).emit(devices);
         };
 
         spawn_local(handler);
       }
-
-      //Request::SetStream(stream) => self.media_stream = Some(stream),
-      Request::SetDevices(devices) => self.known_devices = devices
     }
   }
 
@@ -108,5 +117,9 @@ impl Agent for MediaManager {
 
   fn disconnected(&mut self, id: HandlerId) {
     self.subscribers.remove(&id);
+  }
+
+  fn name_of_resource() -> &'static str {
+    "media-manager.js"
   }
 }
