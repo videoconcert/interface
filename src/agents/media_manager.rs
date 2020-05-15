@@ -19,10 +19,14 @@ pub enum Message {
   SetDevices(Vec<InputDeviceInfo>),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+pub enum Output {
+  GetStreamReceived,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DeviceId(pub String);
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct InputDeviceInfo {
   device_id: DeviceId,
@@ -41,15 +45,17 @@ pub struct MediaManager {
 }
 
 impl Agent for MediaManager {
-  type Reach = Context;
+  type Reach = Context<Self>;
   type Message = Message;
   type Input = Request;
-  type Output = ();
+  type Output = Output;
 
   fn create(link: AgentLink<Self>) -> Self {
     let window = window().unwrap();
     let navigator = window.navigator();
     let media_devices = navigator.media_devices().unwrap();
+
+    console::log_1(&"Initlized".into());
 
     MediaManager {
       known_devices: Vec::new(),
@@ -74,9 +80,14 @@ impl Agent for MediaManager {
     }
   }
 
-  fn handle_input(&mut self, msg: Self::Input, _: HandlerId) {
+  fn handle_input(&mut self, msg: Self::Input, _asker: HandlerId) {
     match msg {
       Request::GetStream => {
+        for sub in self.subscribers.iter() {
+          self.link.respond(*sub, Output::GetStreamReceived);
+        }
+
+        console::log_1(&"Continuing handling getstream".into());
         let mut media_constraints = MediaStreamConstraints::new();
         media_constraints.audio(&JsValue::TRUE)
                          .video(&JsValue::TRUE);
@@ -88,7 +99,10 @@ impl Agent for MediaManager {
         let link = self.link.clone();
         let handler = async move {
             let media = JsFuture::from(media_promise).await.unwrap();
-            link.callback(|media| Message::SetStream(media)).emit(media);
+            link.callback(|media| {
+              let resp = Message::SetStream(media);
+              resp
+            }).emit(media);
         };
 
         spawn_local(handler);

@@ -8,7 +8,7 @@ module.exports = (env, argv) => {
     devServer: {
       contentBase: distPath,
       compress: argv.mode === 'production',
-      port: 8000
+      port: 8008
     },
     entry: './bootstrap.js',
     output: {
