@@ -1,10 +1,8 @@
-use yew::worker::*;
-use yew::agent::{AgentLink};
+use yew::agent::{AgentLink, Stateful, StatefulWrapper};
 use wasm_bindgen::prelude::*;
 use web_sys::{MediaDevices, window, console, MediaStreamConstraints};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
-use std::collections::HashSet;
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -16,11 +14,8 @@ pub enum Request {
 #[derive(Debug)]
 pub enum Message {
   SetStream(JsValue),
+  SetStreamError(JsValue),
   SetDevices(Vec<InputDeviceInfo>),
-}
-
-pub enum Output {
-  GetStreamReceived,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -36,57 +31,32 @@ pub struct InputDeviceInfo {
 }
 
 pub struct MediaManager {
-  known_devices: Vec<InputDeviceInfo>,
-  media_stream: Option<JsValue>,
-
-  subscribers: HashSet<HandlerId>,
-  media_devices: MediaDevices,
-  link: AgentLink<MediaManager>,
+  pub known_devices: Vec<InputDeviceInfo>,
+  pub media_stream: Option<JsValue>,
+  pub media_devices: MediaDevices,
+  pub set_stream_error: Option<JsValue>,
 }
 
-impl Agent for MediaManager {
-  type Reach = Context<Self>;
+impl Stateful for MediaManager {
   type Message = Message;
   type Input = Request;
-  type Output = Output;
 
-  fn create(link: AgentLink<Self>) -> Self {
+  fn new() -> Self {
     let window = window().unwrap();
     let navigator = window.navigator();
     let media_devices = navigator.media_devices().unwrap();
 
-    console::log_1(&"Initlized".into());
-
     MediaManager {
       known_devices: Vec::new(),
       media_stream: None,
-
-      subscribers: HashSet::new(),
       media_devices,
-      link
+      set_stream_error: None,
     }
   }
 
-  fn update(&mut self, msg: Self::Message) {
-    match msg {
-      Message::SetStream(stream) => {
-        console::log_2(&"We have stream".into(), &stream);
-        self.media_stream = Some(stream);
-      },
-      Message::SetDevices(devices) => {
-        console::log_2(&"We have devices".into(), &JsValue::from_serde(&devices).unwrap());
-        self.known_devices = devices;
-      }
-    }
-  }
-
-  fn handle_input(&mut self, msg: Self::Input, _asker: HandlerId) {
+  fn handle_input(&self, link: AgentLink<StatefulWrapper<Self>>, msg: Self::Input) {
     match msg {
       Request::GetStream => {
-        for sub in self.subscribers.iter() {
-          self.link.respond(*sub, Output::GetStreamReceived);
-        }
-
         console::log_1(&"Continuing handling getstream".into());
         let mut media_constraints = MediaStreamConstraints::new();
         media_constraints.audio(&JsValue::TRUE)
@@ -96,44 +66,39 @@ impl Agent for MediaManager {
             &self.media_devices,
             &media_constraints).unwrap();
 
-        let link = self.link.clone();
-        let handler = async move {
-            let media = JsFuture::from(media_promise).await.unwrap();
-            link.callback(|media| {
-              let resp = Message::SetStream(media);
-              resp
-            }).emit(media);
-        };
-
-        spawn_local(handler);
+        spawn_local(async move {
+            match JsFuture::from(media_promise).await {
+              Ok(media) => link.send_message(Message::SetStream(media)),
+              Err(e) => link.send_message(Message::SetStreamError(e)),
+            }
+        });
       }
       Request::GetDevices => {
         let devices_promise = MediaDevices::enumerate_devices(&self.media_devices).unwrap();
 
-        let link = self.link.clone();
-        let handler = async move {
+        spawn_local(async move {
             let devices = JsFuture::from(devices_promise).await
                             .unwrap()
                             .into_serde::<Vec<InputDeviceInfo>>()
                             .unwrap();
 
-            link.callback(|devices| Message::SetDevices(devices)).emit(devices);
-        };
-
-        spawn_local(handler);
+            link.send_message(Message::SetDevices(devices));
+        });
       }
     }
   }
 
-  fn connected(&mut self, id: HandlerId) {
-    self.subscribers.insert(id);
-  }
-
-  fn disconnected(&mut self, id: HandlerId) {
-    self.subscribers.remove(&id);
-  }
-
-  fn name_of_resource() -> &'static str {
-    "media-manager.js"
+  fn reduce(&mut self, msg: Self::Message) {
+    match msg {
+      Message::SetStream(stream) => {
+        self.media_stream = Some(stream);
+      },
+      Message::SetStreamError(error) => {
+        self.set_stream_error = Some(error);
+      }
+      Message::SetDevices(devices) => {
+        self.known_devices = devices;
+      }
+    }
   }
 }

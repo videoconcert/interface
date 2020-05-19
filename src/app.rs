@@ -1,18 +1,20 @@
 use yew::prelude::*;
-use yew::agent::{Dispatcher, Dispatched};
+use yew::agent::{Bridgeable, Dispatcher, Dispatched, StatefulWrapper};
 use web_sys::{console};
+use std::rc::Rc;
+use std::cell::RefCell;
 
-use crate::agents::media_manager::{MediaManager, Request, Output as MMOutput};
+use crate::agents::media_manager::{MediaManager, Request};
 
 pub struct App {
     link: ComponentLink<Self>,
-    media_manager: Box<dyn Bridge<MediaManager>>
+    media_manager: Box<dyn Bridge<StatefulWrapper<MediaManager>>>
 }
 
 pub enum Msg {
     GetStream,
     GetDevices,
-    MediaManagerMsg(MMOutput),
+    MediaManagerMsg(Rc<RefCell<MediaManager>>),
 }
 
 impl Component for App {
@@ -35,8 +37,12 @@ impl Component for App {
                 console::log_1(&"after send".into());
             },
             Msg::GetDevices => self.media_manager.send(Request::GetDevices),
-            Msg::MediaManagerMsg(MMOutput::GetStreamReceived) => {
-                console::log_1(&"Get stream received".into());
+            Msg::MediaManagerMsg(state) => {
+                if let Some(stream) = &state.borrow().media_stream {
+                    console::log_2(&"We have a stream".into(), &stream);
+                }
+
+                console::log_1(&"Received update".into());
             },
         }
         false
