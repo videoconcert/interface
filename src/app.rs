@@ -1,20 +1,19 @@
 use yew::prelude::*;
-use yew::agent::{Bridgeable, Dispatcher, Dispatched, StatefulWrapper};
+use wasm_bindgen::prelude::*;
 use web_sys::{console};
-use std::rc::Rc;
-use std::cell::RefCell;
+use yewtil::store::{StoreWrapper, Bridgeable, ReadOnly};
 
-use crate::agents::media_manager::{MediaManager, Request};
+use crate::agents::camera_manager::{CameraManager, Request};
 
 pub struct App {
     link: ComponentLink<Self>,
-    media_manager: Box<dyn Bridge<StatefulWrapper<MediaManager>>>
+    media_manager: Box<dyn Bridge<StoreWrapper<CameraManager>>>
 }
 
 pub enum Msg {
     GetStream,
     GetDevices,
-    MediaManagerMsg(Rc<RefCell<MediaManager>>),
+    CameraManagerMsg(ReadOnly<CameraManager>),
 }
 
 impl Component for App {
@@ -22,8 +21,8 @@ impl Component for App {
     type Properties = ();
 
     fn create(_: Self::Properties, link: ComponentLink<Self>) -> Self {
-        let callback = link.callback(Msg::MediaManagerMsg);
-        let media_manager = MediaManager::bridge(callback);
+        let callback = link.callback(Msg::CameraManagerMsg);
+        let media_manager = CameraManager::bridge(callback);
         Self {
             link,
             media_manager
@@ -37,12 +36,18 @@ impl Component for App {
                 console::log_1(&"after send".into());
             },
             Msg::GetDevices => self.media_manager.send(Request::GetDevices),
-            Msg::MediaManagerMsg(state) => {
+            Msg::CameraManagerMsg(state) => {
                 if let Some(stream) = &state.borrow().media_stream {
                     console::log_2(&"We have a stream".into(), &stream);
                 }
 
-                console::log_1(&"Received update".into());
+                if let Some(constraints) = &state.borrow().supported_constraints {
+                    let as_str = constraints
+                        .iter()
+                        .map(|constr| constr.to_string() + ", ")
+                        .collect::<String>();
+                    console::log_2(&"We have constraints:".into(), &as_str.into());
+                }
             },
         }
         false
