@@ -1,19 +1,22 @@
 use yew::prelude::*;
-use wasm_bindgen::prelude::*;
 use web_sys::{console};
 use yewtil::store::{StoreWrapper, Bridgeable, ReadOnly};
+use wasm_bindgen_futures::{spawn_local};
 
 use crate::agents::camera_manager::{CameraManager, Request};
+use webworker::agents::private_test::{PrivateTest, PrivateInput};
 
 pub struct App {
     link: ComponentLink<Self>,
-    media_manager: Box<dyn Bridge<StoreWrapper<CameraManager>>>
+    media_manager: Box<dyn Bridge<StoreWrapper<CameraManager>>>,
+    priv_test: Box<dyn Bridge<PrivateTest>>,
 }
 
 pub enum Msg {
     GetStream,
     GetDevices,
     CameraManagerMsg(ReadOnly<CameraManager>),
+    PrivateMsg(i32)
 }
 
 impl Component for App {
@@ -21,11 +24,16 @@ impl Component for App {
     type Properties = ();
 
     fn create(_: Self::Properties, link: ComponentLink<Self>) -> Self {
+        console::log_1(&"creating a component".into());
         let callback = link.callback(Msg::CameraManagerMsg);
         let media_manager = CameraManager::bridge(callback);
+
+        let priv_cb = link.callback(Msg::PrivateMsg);
+        let priv_test = PrivateTest::bridge(priv_cb);
         Self {
             link,
-            media_manager
+            media_manager,
+            priv_test
         }
     }
 
@@ -33,10 +41,17 @@ impl Component for App {
         match msg {
             Msg::GetStream => {
                 self.media_manager.send(Request::GetStream);
-                console::log_1(&"after send".into());
+                spawn_local(async {
+                    console::log_1(&"after send".into());
+                });
             },
-            Msg::GetDevices => self.media_manager.send(Request::GetDevices),
+            Msg::GetDevices => {
+                console::log_2(&"get devices".into(), &"Into".into());
+                self.priv_test.send(PrivateInput(123));
+                self.media_manager.send(Request::GetDevices)
+            },
             Msg::CameraManagerMsg(state) => {
+                console::log_1(&"Blah blah".into());
                 if let Some(stream) = &state.borrow().media_stream {
                     console::log_2(&"We have a stream".into(), &stream);
                 }
@@ -46,9 +61,12 @@ impl Component for App {
                         .iter()
                         .map(|constr| constr.to_string() + ", ")
                         .collect::<String>();
-                    console::log_2(&"We have constraints:".into(), &as_str.into());
+                    //console::log_2(&"We have constraints:".into(), &as_str.into());
                 }
             },
+            Msg::PrivateMsg(_) => {
+                console::log_1(&"We got a private msg".into());
+            }
         }
         false
     }

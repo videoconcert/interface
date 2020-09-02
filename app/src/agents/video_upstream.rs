@@ -1,4 +1,3 @@
-use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
 
 use yew::agent::{AgentLink};
